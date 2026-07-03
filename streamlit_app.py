@@ -193,6 +193,7 @@ category_pie_fig = None
 col_cat_table, col_cat_pie = st.columns([2, 3])
 
 with col_cat_table:
+    st.subheader("Comparison table")
     if (filtered["provider"] == "haver-local").any():
         haver_all = filtered[filtered["provider"] == "haver-local"][["ProviderMnemonic", "date", "value"]]
         alt_all = filtered[filtered["provider"] != "haver-local"][["ProviderMnemonic", "provider", "date", "value"]]
