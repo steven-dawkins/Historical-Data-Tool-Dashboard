@@ -76,9 +76,6 @@ if "haver_long_source" in df.columns:
         ]
         filtered = df[df["ProviderMnemonic"].isin(haver_mnemonics)]
 
-# --- Alternate source comparison ---
-st.subheader("Alternate source comparison")
-
 
 def _infer_step(dates: pd.Series) -> float | None:
     uniq = sorted(dates.dropna().unique())
@@ -446,9 +443,16 @@ with col_cat_pie:
                     top0_range = top0 * headroom if top0 else 1
                     top1_range = top1 * headroom if top1 else 1
 
+                # Don't clip negative data at a hard zero floor — extend the
+                # bottom of each axis down to its own series' actual minimum.
+                bottom0 = min(s0_vals.min(), 0) if len(s0_vals) else 0
+                bottom1 = min(s1_vals.min(), 0) if len(s1_vals) else 0
+                bottom0_range = bottom0 * headroom if bottom0 < 0 else 0
+                bottom1_range = bottom1 * headroom if bottom1 < 0 else 0
+
                 fig.update_layout(
-                    yaxis=dict(title=series_order[0], range=[0, top0_range]),
-                    yaxis2=dict(title=second, overlaying="y", side="right", range=[0, top1_range]),
+                    yaxis=dict(title=series_order[0], range=[bottom0_range, top0_range]),
+                    yaxis2=dict(title=second, overlaying="y", side="right", range=[bottom1_range, top1_range]),
                 )
 
         fig.update_layout(
