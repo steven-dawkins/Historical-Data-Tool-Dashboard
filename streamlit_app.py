@@ -457,16 +457,17 @@ with col_cat_pie:
         )
         st.plotly_chart(fig, use_container_width=True)
 
-        series_info = (
-            plot_df
-            .drop_duplicates(subset=["_series"])
-            [["_series", "indicator_id", "indicator_name"]]
-            .rename(columns={"_series": "Series", "indicator_id": "indicator_id", "indicator_name": "indicator_name"})
-            .set_index("Series")
-            .loc[series_order]
-            .reset_index()
-        )
-        st.dataframe(series_info, use_container_width=True, hide_index=True)
+if not chart_df.empty:
+    series_info = (
+        plot_df
+        .drop_duplicates(subset=["_series"])
+        [["_series", "indicator_id", "indicator_name"]]
+        .rename(columns={"_series": "Series", "indicator_id": "indicator_id", "indicator_name": "indicator_name"})
+        .set_index("Series")
+        .loc[series_order]
+        .reset_index()
+    )
+    st.dataframe(series_info, use_container_width=True, hide_index=True)
 
 # --- Raw data table ---
 st.subheader("Side by side data")
