@@ -95,6 +95,11 @@ def _categorize_pair(haver_g: pd.DataFrame, alt_g: pd.DataFrame) -> dict:
         "ratio_median": None,
     }
 
+    disc_frames = [g["haver_discontinued"] for g in (haver_g, alt_g) if "haver_discontinued" in g.columns]
+    if disc_frames and pd.concat(disc_frames).fillna(False).astype(bool).any():
+        result["category"] = "Discontinued"
+        return result
+
     if n_alt == 0:
         result["category"] = "Missing alternate source"
         return result
@@ -192,8 +197,13 @@ col_cat_table, col_cat_pie = st.columns([2, 3])
 with col_cat_table:
     st.subheader("Comparison table")
     if (filtered["provider"] == "haver-local").any():
-        haver_all = filtered[filtered["provider"] == "haver-local"][["ProviderMnemonic", "date", "value"]]
-        alt_all = filtered[filtered["provider"] != "haver-local"][["ProviderMnemonic", "provider", "date", "value"]]
+        haver_cols = ["ProviderMnemonic", "date", "value"]
+        alt_cols = ["ProviderMnemonic", "provider", "date", "value"]
+        if "haver_discontinued" in filtered.columns:
+            haver_cols.append("haver_discontinued")
+            alt_cols.append("haver_discontinued")
+        haver_all = filtered[filtered["provider"] == "haver-local"][haver_cols]
+        alt_all = filtered[filtered["provider"] != "haver-local"][alt_cols]
         empty_alt = alt_all.iloc[0:0]
 
         category_rows = []
@@ -212,6 +222,18 @@ with col_cat_table:
                     )
 
         category_df = pd.DataFrame(category_rows).sort_values(["category", "ProviderMnemonic"]).reset_index(drop=True)
+        category_counts_all = category_df["category"].value_counts()
+
+        categories = sorted(category_df["category"].unique())
+        selected_categories = st.pills(
+            "Category",
+            options=categories,
+            selection_mode="multi",
+            format_func=lambda c: f"{c} ({category_counts_all.loc[c]})",
+        )
+        if selected_categories:
+            category_df = category_df[category_df["category"].isin(selected_categories)].reset_index(drop=True)
+
         category_counts = category_df["category"].value_counts()
 
         st.caption(" · ".join(f"{cat}: {n}" for cat, n in category_counts.items()) + " — select a row to plot and see diagnostics.")
@@ -243,6 +265,7 @@ with col_cat_table:
             "Different frequency": "#ec835a",
             "Complete mismatch": "#d03b3b",
             "Missing alternate source": "#898781",
+            "Discontinued": "#4d4d4d",
         }
         category_pie_fig = px.pie(
             category_counts.reset_index(name="count"),
