@@ -17,8 +17,8 @@ def _parse_dates(series: pd.Series) -> pd.Series:
     result = pd.to_numeric(series, errors="coerce")
     mask = result.isna()
     if mask.any():
-        # "1990 Q1" / "1990Q2" → decimal year (Q1=.0, Q2=.25, Q3=.5, Q4=.75)
-        quarterly = series[mask].str.extract(r"(\d{4})\s*[Qq](\d)", expand=True)
+        # "1990 Q1" / "1990Q2" / "2020-Q1" → decimal year (Q1=.0, Q2=.25, Q3=.5, Q4=.75)
+        quarterly = series[mask].str.extract(r"(\d{4})[\s-]*[Qq](\d)", expand=True)
         valid = quarterly[0].notna()
         if valid.any():
             year = pd.to_numeric(quarterly.loc[valid, 0])
