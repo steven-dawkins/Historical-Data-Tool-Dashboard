@@ -248,6 +248,7 @@ with col_cat_table:
             height=580,
             row_height=26,
             column_order=["ProviderMnemonic", "provider", "category"],
+            column_config={"ProviderMnemonic": st.column_config.Column("haver_code")},
         )
         category_selected_rows = category_selection.selection.rows
         if category_selected_rows:
@@ -488,19 +489,26 @@ with col_cat_pie:
         st.plotly_chart(fig, use_container_width=True)
 
 if not chart_df.empty:
+    # Build from the full chart_df (not the 50-series-capped plot_df) so the
+    # table lists every series from both sources.
+    all_series = chart_df.copy()
+    if all_series["provider"].nunique() > 1:
+        all_series["_series"] = all_series["indicator_id"] + "  [" + all_series["provider"] + "]"
+    else:
+        all_series["_series"] = all_series["indicator_id"]
     series_info = (
-        plot_df
+        all_series
         .drop_duplicates(subset=["_series"])
         [["_series", "ProviderMnemonic", "provider", "indicator_id", "indicator_name"]]
         .rename(columns={"_series": "Series"})
-        .set_index("Series")
-        .loc[series_order]
-        .reset_index()
+        .sort_values("Series")
+        .reset_index(drop=True)
     )
     series_info = series_info.merge(long_source_map, on="ProviderMnemonic", how="left")
     series_info = series_info[
         ["Series", "provider", "indicator_id", "indicator_name", "haver_long_source"]
     ]
+    st.caption(f"{len(series_info):,} series")
     st.dataframe(series_info, use_container_width=True, hide_index=True)
 
 # --- Raw data table ---
