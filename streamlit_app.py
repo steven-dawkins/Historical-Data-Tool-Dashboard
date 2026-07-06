@@ -519,3 +519,52 @@ raw_unformatted = chart_df.sort_values("date").drop(columns=["haver_description"
 obj_cols = raw_unformatted.select_dtypes(include="object").columns
 raw_unformatted[obj_cols] = raw_unformatted[obj_cols].fillna("")
 st.dataframe(raw_unformatted, use_container_width=True, hide_index=True)
+
+# --- Comparison table with a full chart per row ---
+st.subheader("Comparison with charts")
+if "category_df" in globals() and category_df is not None and not category_df.empty:
+    plot_all = filtered.dropna(subset=["date", "value"]).sort_values("date")
+
+    _ROW_CAP = 40
+    rows_to_show = category_df
+    if len(category_df) > _ROW_CAP:
+        st.info(f"{len(category_df)} rows — showing first {_ROW_CAP}. Use the filters above to narrow down.")
+        rows_to_show = category_df.head(_ROW_CAP)
+
+    for _, row in rows_to_show.iterrows():
+        mnemonic, prov, cat = row["ProviderMnemonic"], row["provider"], row["category"]
+        col_meta, col_row_chart = st.columns([1, 3])
+
+        with col_meta:
+            st.markdown(f"**{mnemonic}**")
+            st.caption(f"{prov or '—'} · {cat}")
+
+        with col_row_chart:
+            providers = ["haver-local"] + ([prov] if prov else [])
+            row_df = plot_all[
+                (plot_all["ProviderMnemonic"] == mnemonic)
+                & (plot_all["provider"].isin(providers))
+            ]
+            if row_df.empty:
+                st.caption("No data to plot.")
+            else:
+                row_fig = px.line(
+                    row_df,
+                    x="date",
+                    y="value",
+                    color="provider",
+                    labels={"date": "Year", "value": "Value", "provider": "Provider"},
+                )
+                row_fig.update_layout(
+                    height=180,
+                    margin=dict(t=10, b=10, l=10, r=10),
+                    legend=dict(orientation="h", y=1.15, x=0),
+                    showlegend=True,
+                )
+                st.plotly_chart(
+                    row_fig,
+                    use_container_width=True,
+                    key=f"rowchart_{mnemonic}_{prov}",
+                )
+else:
+    st.info("No comparison data available to chart.")
