@@ -6,10 +6,12 @@ import plotly.express as px
 
 st.set_page_config(page_title="Historical Data Dashboard", layout="wide")
 
+SECTOR = "UK"
+
 DATA_DIR = "./"
 FILES = [
-    DATA_DIR + "UK_data_alt.csv",
-    DATA_DIR + "UK_data_haver.csv",
+    DATA_DIR + SECTOR + "_data_alt.csv",
+    DATA_DIR + SECTOR + "_data_haver.csv",
 ]
 
 
@@ -489,12 +491,16 @@ if not chart_df.empty:
     series_info = (
         plot_df
         .drop_duplicates(subset=["_series"])
-        [["_series", "indicator_id", "indicator_name"]]
-        .rename(columns={"_series": "Series", "indicator_id": "indicator_id", "indicator_name": "indicator_name"})
+        [["_series", "ProviderMnemonic", "provider", "indicator_id", "indicator_name"]]
+        .rename(columns={"_series": "Series"})
         .set_index("Series")
         .loc[series_order]
         .reset_index()
     )
+    series_info = series_info.merge(long_source_map, on="ProviderMnemonic", how="left")
+    series_info = series_info[
+        ["Series", "provider", "indicator_id", "indicator_name", "haver_long_source"]
+    ]
     st.dataframe(series_info, use_container_width=True, hide_index=True)
 
 # --- Raw data table ---
