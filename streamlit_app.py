@@ -9,8 +9,6 @@ st.set_page_config(page_title="Historical Data Dashboard", layout="wide")
 DATA_DIR = "./"
 SECTORS = ["UK", "COLOMBIA"]
 
-SECTOR = st.sidebar.selectbox("Sector", SECTORS)
-
 
 def _parse_dates(series: pd.Series) -> pd.Series:
     result = pd.to_numeric(series, errors="coerce")
@@ -54,9 +52,14 @@ def load_data(sector: str) -> pd.DataFrame:
     return df
 
 
+title_col, sector_col = st.columns([4, 1])
+with sector_col:
+    SECTOR = st.selectbox("Sector", SECTORS)
+
 df = load_data(SECTOR)
 
-st.title(f"Historical Data Dashboard — {SECTOR}")
+with title_col:
+    st.title(f"Historical Data Dashboard — {SECTOR}")
 
 filtered = df
 
