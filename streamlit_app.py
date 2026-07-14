@@ -6,13 +6,10 @@ import plotly.express as px
 
 st.set_page_config(page_title="Historical Data Dashboard", layout="wide")
 
-SECTOR = "UK"
-
 DATA_DIR = "./"
-FILES = [
-    DATA_DIR + SECTOR + "_data_alt.csv",
-    DATA_DIR + SECTOR + "_data_haver.csv",
-]
+SECTORS = ["UK", "COLOMBIA"]
+
+SECTOR = st.sidebar.selectbox("Sector", SECTORS)
 
 
 def _parse_dates(series: pd.Series) -> pd.Series:
@@ -41,16 +38,25 @@ def _parse_dates(series: pd.Series) -> pd.Series:
 
 
 @st.cache_data
-def load_data() -> pd.DataFrame:
-    df = pd.concat([pd.read_csv(f) for f in FILES], ignore_index=True)
+def load_data(sector: str) -> pd.DataFrame:
+    files = [
+        DATA_DIR + sector + "_data_alt.csv",
+        DATA_DIR + sector + "_data_haver.csv",
+    ]
+    df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
     df["date"] = _parse_dates(df["date"].astype(str))
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    if "categories" in df.columns:
+        # haver-only rows carry the precomputed category under "categories";
+        # alt rows carry it under "category" — fold into one column.
+        df["category"] = df["category"].fillna(df["categories"]) if "category" in df.columns else df["categories"]
+        df = df.drop(columns="categories")
     return df
 
 
-df = load_data()
+df = load_data(SECTOR)
 
-st.title("Historical Data Dashboard")
+st.title(f"Historical Data Dashboard — {SECTOR}")
 
 filtered = df
 
@@ -78,116 +84,22 @@ if "haver_long_source" in df.columns:
         ]
         filtered = df[df["ProviderMnemonic"].isin(haver_mnemonics)]
 
-
-def _infer_step(dates: pd.Series) -> float | None:
-    uniq = sorted(dates.dropna().unique())
-    if len(uniq) < 2:
-        return None
-    diffs = pd.Series(uniq).diff().dropna()
-    return diffs.median() if len(diffs) else None
-
-
-def _categorize_pair(haver_g: pd.DataFrame, alt_g: pd.DataFrame) -> dict:
-    n_haver, n_alt = len(haver_g), len(alt_g)
-    result = {
-        "n_haver": n_haver,
-        "n_alt": n_alt,
-        "n_overlap": None,
-        "corr": None,
-        "ratio_median": None,
-    }
-
-    disc_frames = [g["haver_discontinued"] for g in (haver_g, alt_g) if "haver_discontinued" in g.columns]
-    if disc_frames and pd.concat(disc_frames).fillna(False).astype(bool).any():
-        result["category"] = "Discontinued"
-        return result
-
-    if n_alt == 0:
-        result["category"] = "Missing alternate source"
-        return result
-
-    haver_step = _infer_step(haver_g["date"])
-    alt_step = _infer_step(alt_g["date"])
-    if haver_step and alt_step:
-        step_ratio = max(haver_step, alt_step) / min(haver_step, alt_step)
-        if step_ratio > 1.8:
-            # Different sampling frequency: confirm the two actually agree by
-            # comparing annual averages rather than assuming a frequency gap
-            # explains everything (a genuinely mismatched series can also
-            # happen to sit at a different frequency).
-            haver_annual = haver_g.assign(year=haver_g["date"].astype(int)).groupby("year")["value"].mean()
-            alt_annual = alt_g.assign(year=alt_g["date"].astype(int)).groupby("year")["value"].mean()
-            annual = pd.concat([haver_annual.rename("_haver"), alt_annual.rename("_alt")], axis=1).dropna()
-            annual_valid = annual[(annual["_haver"] != 0) & annual["_haver"].notna() & annual["_alt"].notna()]
-
-            if len(annual_valid) > 2:
-                annual_ratios = annual_valid["_alt"] / annual_valid["_haver"]
-                annual_ratio_median = annual_ratios.median()
-                annual_ratio_cv = (
-                    (annual_ratios.std() / abs(annual_ratio_median)) if annual_ratio_median else float("inf")
-                )
-                annual_corr = annual["_alt"].corr(annual["_haver"])
-                result["n_overlap"] = len(annual)
-                result["ratio_median"] = round(annual_ratio_median, 4)
-                result["corr"] = round(annual_corr, 3) if annual_corr is not None else None
-
-                if (annual_corr is not None and annual_corr < 0.5) or annual_ratio_cv > 0.25:
-                    result["category"] = "Complete mismatch"
-                    return result
-
-                if not (0.9 <= annual_ratio_median <= 1.1):
-                    result["category"] = "Different scale"
-                    return result
-
-            result["category"] = "Different frequency"
-            return result
-
-    merged = alt_g[["date", "value"]].merge(
-        haver_g[["date", "value"]], on="date", suffixes=("_alt", "_haver")
-    )
-    n_overlap = len(merged)
-    result["n_overlap"] = n_overlap
-
-    if n_overlap == 0:
-        haver_min, haver_max = haver_g["date"].min(), haver_g["date"].max()
-        alt_min, alt_max = alt_g["date"].min(), alt_g["date"].max()
-        if haver_max <= alt_min or alt_max <= haver_min:
-            result["category"] = "Backfilled by haver"
-        else:
-            result["category"] = "Complete mismatch"
-        return result
-
-    valid = merged[
-        merged["value_haver"].notna()
-        & merged["value_alt"].notna()
-        & (merged["value_haver"] != 0)
+# --- Provider filter ---
+provider_options = sorted(df["provider"].dropna().unique())
+provider_mnemonic_counts = (
+    df.dropna(subset=["provider"]).groupby("provider")["ProviderMnemonic"].nunique()
+)
+selected_providers = st.pills(
+    "Provider",
+    options=provider_options,
+    selection_mode="multi",
+    format_func=lambda p: f"{p} ({provider_mnemonic_counts.get(p, 0)})",
+)
+if selected_providers:
+    provider_mnemonics = filtered.loc[
+        filtered["provider"].isin(selected_providers), "ProviderMnemonic"
     ]
-    if len(valid) == 0:
-        result["category"] = "Complete mismatch"
-        return result
-
-    ratios = valid["value_alt"] / valid["value_haver"]
-    ratio_median = ratios.median()
-    ratio_cv = (ratios.std() / abs(ratio_median)) if ratio_median else float("inf")
-    corr = merged["value_alt"].corr(merged["value_haver"]) if n_overlap > 2 else None
-    result["ratio_median"] = round(ratio_median, 4)
-    result["corr"] = round(corr, 3) if corr is not None else None
-
-    if (corr is not None and corr < 0.5) or ratio_cv > 0.25:
-        result["category"] = "Complete mismatch"
-        return result
-
-    if not (0.9 <= ratio_median <= 1.1):
-        result["category"] = "Different scale"
-        return result
-
-    extra_haver = n_haver - n_overlap
-    if extra_haver > 0 and extra_haver / n_haver > 0.1:
-        result["category"] = "Backfilled by haver"
-        return result
-
-    result["category"] = "Matches"
-    return result
+    filtered = filtered[filtered["ProviderMnemonic"].isin(provider_mnemonics)]
 
 
 category_selected_mnemonics: list = []
@@ -198,32 +110,38 @@ col_cat_table, col_cat_pie = st.columns([2, 3])
 
 with col_cat_table:
     st.subheader("Comparison table")
-    if (filtered["provider"] == "haver-local").any():
-        haver_cols = ["ProviderMnemonic", "date", "value"]
-        alt_cols = ["ProviderMnemonic", "provider", "date", "value"]
-        if "haver_discontinued" in filtered.columns:
-            haver_cols.append("haver_discontinued")
-            alt_cols.append("haver_discontinued")
-        haver_all = filtered[filtered["provider"] == "haver-local"][haver_cols]
-        alt_all = filtered[filtered["provider"] != "haver-local"][alt_cols]
-        empty_alt = alt_all.iloc[0:0]
+    if "category" not in filtered.columns:
+        st.info("No comparison data in the loaded source files; category columns are missing.")
+    elif not (filtered["provider"] == "haver-local").any():
+        st.info("No haver-local data loaded; cannot categorize alternate sources.")
+    else:
+        diag_cols = [c for c in ["n_haver", "n_alt", "n_overlap", "corr", "ratio_median"] if c in filtered.columns]
 
-        category_rows = []
-        for mnemonic, haver_g in haver_all.groupby("ProviderMnemonic"):
-            alt_for_mnemonic = alt_all[alt_all["ProviderMnemonic"] == mnemonic]
-            alt_providers = sorted(alt_for_mnemonic["provider"].dropna().unique())
-            if not alt_providers:
-                category_rows.append(
-                    {"ProviderMnemonic": mnemonic, "provider": None, **_categorize_pair(haver_g, empty_alt)}
-                )
-            else:
-                for prov in alt_providers:
-                    alt_g = alt_for_mnemonic[alt_for_mnemonic["provider"] == prov]
-                    category_rows.append(
-                        {"ProviderMnemonic": mnemonic, "provider": prov, **_categorize_pair(haver_g, alt_g)}
-                    )
+        # Alt-side rows carry a category per (ProviderMnemonic, provider) pair.
+        alt_categorized = (
+            filtered[filtered["provider"] != "haver-local"]
+            .dropna(subset=["category"])
+            .drop_duplicates(subset=["ProviderMnemonic", "provider"])
+            [["ProviderMnemonic", "provider", "category"] + diag_cols]
+        )
 
-        category_df = pd.DataFrame(category_rows).sort_values(["category", "ProviderMnemonic"]).reset_index(drop=True)
+        # Mnemonics with no alt pairing fall back to the haver-local category.
+        haver_only = (
+            filtered[
+                (filtered["provider"] == "haver-local")
+                & ~filtered["ProviderMnemonic"].isin(alt_categorized["ProviderMnemonic"])
+            ]
+            .dropna(subset=["category"])
+            .drop_duplicates(subset=["ProviderMnemonic"])
+            [["ProviderMnemonic", "category"]]
+        )
+        haver_only["provider"] = None
+
+        category_df = (
+            pd.concat([alt_categorized, haver_only], ignore_index=True)
+            .sort_values(["category", "ProviderMnemonic"])
+            .reset_index(drop=True)
+        )
         category_counts_all = category_df["category"].value_counts()
 
         categories = sorted(category_df["category"].unique())
@@ -256,10 +174,8 @@ with col_cat_table:
                 category_df.iloc[category_selected_rows]["ProviderMnemonic"].unique().tolist()
             )
             diag = category_df.iloc[category_selected_rows[0]]
-            st.caption(
-                f"n_haver: {diag['n_haver']} · n_alt: {diag['n_alt']} · n_overlap: {diag['n_overlap']} "
-                f"· corr: {diag['corr']} · ratio_median: {diag['ratio_median']}"
-            )
+            if diag_cols:
+                st.caption(" · ".join(f"{c}: {diag[c]}" for c in diag_cols))
 
         _CATEGORY_COLORS = {
             "Matches": "#0ca30c",
@@ -281,8 +197,6 @@ with col_cat_table:
         )
         category_pie_fig.update_traces(textinfo="percent+value")
         category_pie_fig.update_layout(height=430, margin=dict(t=40, b=10))
-    else:
-        st.info("No haver-local data loaded; cannot categorize alternate sources.")
 
 # Build pivot table
 meta = (
@@ -304,56 +218,6 @@ pivot["providers"] = pivot["provider"].apply(
     lambda s: ", ".join(p for p in other_providers if p in s)
 )
 pivot = pivot.drop(columns="provider").sort_values("ProviderMnemonic").reset_index(drop=True)
-
-# Compute sum of absolute differences between haver-local and each other provider per mnemonic
-if "haver-local" in all_providers and other_providers:
-    haver_vals = (
-        filtered[filtered["provider"] == "haver-local"]
-        [["ProviderMnemonic", "date", "value"]]
-        .rename(columns={"value": "_haver"})
-    )
-    other_vals = filtered[filtered["provider"].isin(other_providers)][["ProviderMnemonic", "date", "value", "provider"]]
-    diff_df = other_vals.merge(haver_vals, on=["ProviderMnemonic", "date"])
-    if diff_df.empty:
-        diff_by_mnemonic = pd.Series(dtype=float)
-    else:
-        diff_by_mnemonic = (
-            diff_df.groupby(["ProviderMnemonic", "provider"])
-            .apply(lambda g: (g["value"] - g["_haver"]).abs().sum() / len(g), include_groups=False)
-            .reset_index(name="diff")
-            .groupby("ProviderMnemonic")["diff"]
-            .sum()
-        )
-    pivot["sum_diff"] = pivot["ProviderMnemonic"].map(diff_by_mnemonic)
-
-    # Compute period-on-period ratios then sum differences in those ratios
-    haver_tmp = (
-        filtered[filtered["provider"] == "haver-local"]
-        .sort_values(["ProviderMnemonic", "date"])
-        .copy()
-    )
-    haver_tmp["_haver_ratio"] = haver_tmp.groupby("ProviderMnemonic")["value"].transform(lambda s: s / s.shift(1))
-    haver_ratios = haver_tmp[["ProviderMnemonic", "date", "_haver_ratio"]].dropna(subset=["_haver_ratio"])
-
-    other_tmp = (
-        filtered[filtered["provider"].isin(other_providers)]
-        .sort_values(["ProviderMnemonic", "provider", "date"])
-        .copy()
-    )
-    other_tmp["ratio"] = other_tmp.groupby(["ProviderMnemonic", "provider"])["value"].transform(lambda s: s / s.shift(1))
-    other_ratios = other_tmp[["ProviderMnemonic", "provider", "date", "ratio"]].dropna(subset=["ratio"])
-    ratio_diff_df = other_ratios.merge(haver_ratios, on=["ProviderMnemonic", "date"])
-    if ratio_diff_df.empty:
-        ratio_diff_by_mnemonic = pd.Series(dtype=float)
-    else:
-        ratio_diff_by_mnemonic = (
-            ratio_diff_df.groupby(["ProviderMnemonic", "provider"])
-            .apply(lambda g: (g["ratio"] - g["_haver_ratio"]).abs().sum() / len(g), include_groups=False)
-            .reset_index(name="ratio_diff")
-            .groupby("ProviderMnemonic")["ratio_diff"]
-            .sum()
-        )
-    pivot["sum_diff_ratio"] = pivot["ProviderMnemonic"].map(ratio_diff_by_mnemonic)
 
 # --- Coverage by haver_long_source ---
 if "haver_long_source" not in filtered.columns:
