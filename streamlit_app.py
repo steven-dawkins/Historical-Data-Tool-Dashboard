@@ -35,6 +35,60 @@ def _parse_dates(series: pd.Series) -> pd.Series:
     return result
 
 
+def _apply_dual_axis(fig, plot_df: pd.DataFrame, series_col: str, series_order: list) -> None:
+    """If there are exactly two series and their ranges differ by more than
+    3x, split the second series onto a secondary y-axis, zero-based and
+    scaled to a clean power-of-10 multiple of the first so equal visual
+    height always means the same order-of-magnitude ratio between them."""
+    if len(series_order) != 2:
+        return
+
+    s0_vals = plot_df[plot_df[series_col] == series_order[0]]["value"].dropna()
+    s1_vals = plot_df[plot_df[series_col] == series_order[1]]["value"].dropna()
+    r0 = s0_vals.max() - s0_vals.min() if len(s0_vals) else 0
+    r1 = s1_vals.max() - s1_vals.min() if len(s1_vals) else 0
+    max_r, min_r = max(r0, r1), min(r0, r1)
+    if not (min_r > 0 and (max_r / min_r) > 3):
+        return
+
+    second = series_order[1]
+    for trace in fig.data:
+        if trace.name == second:
+            trace.yaxis = "y2"
+
+    top0 = max(s0_vals.max(), 0) if len(s0_vals) else 0
+    top1 = max(s1_vals.max(), 0) if len(s1_vals) else 0
+    headroom = 1.1
+    # Fold the headroom into the power threshold so a ratio that lands a
+    # hair above a clean power of 10 (e.g. 1.04e6) doesn't get bumped a
+    # whole extra order of magnitude when the headroom alone already
+    # covers the actual max.
+    if top0 > 0 and top1 > 0:
+        if top0 >= top1:
+            power = max(1, math.ceil(math.log10(top0 / top1) - math.log10(headroom) - 1e-9))
+            top1_range = top1 * headroom
+            top0_range = top1_range * (10 ** power)
+        else:
+            power = max(1, math.ceil(math.log10(top1 / top0) - math.log10(headroom) - 1e-9))
+            top0_range = top0 * headroom
+            top1_range = top0_range * (10 ** power)
+    else:
+        top0_range = top0 * headroom if top0 else 1
+        top1_range = top1 * headroom if top1 else 1
+
+    # Don't clip negative data at a hard zero floor — extend the bottom of
+    # each axis down to its own series' actual minimum.
+    bottom0 = min(s0_vals.min(), 0) if len(s0_vals) else 0
+    bottom1 = min(s1_vals.min(), 0) if len(s1_vals) else 0
+    bottom0_range = bottom0 * headroom if bottom0 < 0 else 0
+    bottom1_range = bottom1 * headroom if bottom1 < 0 else 0
+
+    fig.update_layout(
+        yaxis=dict(title=series_order[0], range=[bottom0_range, top0_range]),
+        yaxis2=dict(title=second, overlaying="y", side="right", range=[bottom1_range, top1_range]),
+    )
+
+
 @st.cache_data
 def load_data(sector: str) -> pd.DataFrame:
     files = [
@@ -299,54 +353,7 @@ with col_cat_pie:
             labels={"date": "Year", "value": "Value", "_series": "Series"},
         )
 
-        if len(series_order) == 2:
-            s0_vals = plot_df[plot_df["_series"] == series_order[0]]["value"].dropna()
-            s1_vals = plot_df[plot_df["_series"] == series_order[1]]["value"].dropna()
-            r0 = s0_vals.max() - s0_vals.min() if len(s0_vals) else 0
-            r1 = s1_vals.max() - s1_vals.min() if len(s1_vals) else 0
-            max_r, min_r = max(r0, r1), min(r0, r1)
-            use_dual_axis = min_r > 0 and (max_r / min_r) > 3
-
-            if use_dual_axis:
-                second = series_order[1]
-                for trace in fig.data:
-                    if trace.name == second:
-                        trace.yaxis = "y2"
-
-                # Zero-base both axes and force their tops to a clean power-of-10
-                # multiple of each other, so equal visual height always means the
-                # same order-of-magnitude ratio between the two series.
-                top0 = max(s0_vals.max(), 0) if len(s0_vals) else 0
-                top1 = max(s1_vals.max(), 0) if len(s1_vals) else 0
-                headroom = 1.1
-                # Fold the headroom into the power threshold so a ratio that lands
-                # a hair above a clean power of 10 (e.g. 1.04e6) doesn't get bumped
-                # a whole extra order of magnitude when the headroom alone already
-                # covers the actual max.
-                if top0 > 0 and top1 > 0:
-                    if top0 >= top1:
-                        power = max(1, math.ceil(math.log10(top0 / top1) - math.log10(headroom) - 1e-9))
-                        top1_range = top1 * headroom
-                        top0_range = top1_range * (10 ** power)
-                    else:
-                        power = max(1, math.ceil(math.log10(top1 / top0) - math.log10(headroom) - 1e-9))
-                        top0_range = top0 * headroom
-                        top1_range = top0_range * (10 ** power)
-                else:
-                    top0_range = top0 * headroom if top0 else 1
-                    top1_range = top1 * headroom if top1 else 1
-
-                # Don't clip negative data at a hard zero floor — extend the
-                # bottom of each axis down to its own series' actual minimum.
-                bottom0 = min(s0_vals.min(), 0) if len(s0_vals) else 0
-                bottom1 = min(s1_vals.min(), 0) if len(s1_vals) else 0
-                bottom0_range = bottom0 * headroom if bottom0 < 0 else 0
-                bottom1_range = bottom1 * headroom if bottom1 < 0 else 0
-
-                fig.update_layout(
-                    yaxis=dict(title=series_order[0], range=[bottom0_range, top0_range]),
-                    yaxis2=dict(title=second, overlaying="y", side="right", range=[bottom1_range, top1_range]),
-                )
+        _apply_dual_axis(fig, plot_df, "_series", series_order)
 
         fig.update_layout(
             height=580,
@@ -429,16 +436,19 @@ if "category_df" in globals() and category_df is not None and not category_df.em
             if row_df.empty:
                 st.caption("No data to plot.")
             else:
+                row_series_order = list(row_df["provider"].unique())
                 row_fig = px.line(
                     row_df,
                     x="date",
                     y="value",
                     color="provider",
+                    category_orders={"provider": row_series_order},
                     labels={"date": "Year", "value": "Value", "provider": "Provider"},
                 )
+                _apply_dual_axis(row_fig, row_df, "provider", row_series_order)
                 row_fig.update_layout(
                     height=180,
-                    margin=dict(t=10, b=10, l=10, r=10),
+                    margin=dict(t=10, b=10, l=10, r=40 if len(row_series_order) == 2 else 10),
                     legend=dict(orientation="h", y=1.15, x=0),
                     showlegend=True,
                 )
