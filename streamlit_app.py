@@ -220,7 +220,7 @@ with row2_left:
         with row3_left:
             category_selection = st.dataframe(
                 category_df,
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 on_select="rerun",
                 selection_mode="single-row",
@@ -308,7 +308,7 @@ source_summary = (
 
 with row1_left:
     if category_pie_fig is not None:
-        st.plotly_chart(category_pie_fig, use_container_width=True)
+        st.plotly_chart(category_pie_fig, width="stretch")
     else:
         st.info("No category data to display.")
 
@@ -357,7 +357,7 @@ with row3_right:
             legend=dict(orientation="v", x=1.01, y=1),
             margin=dict(r=220),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
 if not chart_df.empty:
     # Build from the full chart_df (not the 50-series-capped plot_df) so the
@@ -380,10 +380,10 @@ if not chart_df.empty:
         ["Series", "provider", "indicator_id", "indicator_name", "haver_long_source"]
     ]
     st.caption(f"{len(series_info):,} series")
-    st.dataframe(series_info, use_container_width=True, hide_index=True)
+    st.dataframe(series_info, width="stretch", hide_index=True)
 
 st.subheader("Coverage by source")
-st.dataframe(source_summary, use_container_width=True, hide_index=True, height=430)
+st.dataframe(source_summary, width="stretch", hide_index=True, height=430)
 
 # --- Raw data table ---
 st.subheader("Side by side data")
@@ -399,14 +399,14 @@ raw = (
     .sort_values("date")
 )
 raw.columns.name = None
-st.dataframe(raw, use_container_width=True, hide_index=True)
+st.dataframe(raw, width="stretch", hide_index=True)
 
 # --- Raw unformatted data table ---
 st.subheader("Raw unformatted data")
 raw_unformatted = chart_df.sort_values("date").drop(columns=["haver_description", "OeMnemonic"], errors="ignore").copy()
-obj_cols = raw_unformatted.select_dtypes(include="object").columns
+obj_cols = raw_unformatted.select_dtypes(include=["object", "str"]).columns
 raw_unformatted[obj_cols] = raw_unformatted[obj_cols].fillna("")
-st.dataframe(raw_unformatted, use_container_width=True, hide_index=True)
+st.dataframe(raw_unformatted, width="stretch", hide_index=True)
 
 # --- Comparison table with a full chart per row ---
 st.subheader("Comparison with charts")
@@ -454,7 +454,7 @@ if "category_df" in globals() and category_df is not None and not category_df.em
                 )
                 st.plotly_chart(
                     row_fig,
-                    use_container_width=True,
+                    width="stretch",
                     key=f"rowchart_{mnemonic}_{prov}",
                 )
 else:
