@@ -115,6 +115,10 @@ df = load_data(SECTOR)
 with title_col:
     st.title(f"Historical Data Dashboard — {SECTOR}")
 
+row1_left, row1_right = st.columns([3, 2])
+row2_left, row2_right = st.columns([3, 1])
+row3_left, row3_right = st.columns([2, 3])
+
 filtered = df
 
 if "haver_long_source" in df.columns:
@@ -128,12 +132,13 @@ if "haver_long_source" in df.columns:
     )
 
     sources = sorted(df["haver_long_source"].dropna().unique())
-    selected_sources = st.pills(
-        "Source",
-        options=sources,
-        selection_mode="multi",
-        format_func=lambda s: f"{s} ({source_counts.loc[s, 'n_alt']}/{source_counts.loc[s, 'n_haver']})",
-    )
+    with row1_right:
+        selected_sources = st.pills(
+            "Source",
+            options=sources,
+            selection_mode="multi",
+            format_func=lambda s: f"{s} ({source_counts.loc[s, 'n_alt']}/{source_counts.loc[s, 'n_haver']})",
+        )
     if selected_sources:
         haver_mnemonics = df.loc[
             (df["provider"] == "haver-local") & df["haver_long_source"].isin(selected_sources),
@@ -146,12 +151,13 @@ provider_options = sorted(df["provider"].dropna().unique())
 provider_mnemonic_counts = (
     df.dropna(subset=["provider"]).groupby("provider")["ProviderMnemonic"].nunique()
 )
-selected_providers = st.pills(
-    "Provider",
-    options=provider_options,
-    selection_mode="multi",
-    format_func=lambda p: f"{p} ({provider_mnemonic_counts.get(p, 0)})",
-)
+with row2_right:
+    selected_providers = st.pills(
+        "Provider",
+        options=provider_options,
+        selection_mode="multi",
+        format_func=lambda p: f"{p} ({provider_mnemonic_counts.get(p, 0)})",
+    )
 if selected_providers:
     provider_mnemonics = filtered.loc[
         filtered["provider"].isin(selected_providers), "ProviderMnemonic"
@@ -162,10 +168,7 @@ if selected_providers:
 category_selected_mnemonics: list = []
 category_pie_fig = None
 
-# col_cat_pie holds the line chart (swapped with the pie chart below).
-col_cat_table, col_cat_pie = st.columns([2, 3])
-
-with col_cat_table:
+with row2_left:
     st.subheader("Comparison table")
     if "category" not in filtered.columns:
         st.info("No comparison data in the loaded source files; category columns are missing.")
@@ -214,17 +217,18 @@ with col_cat_table:
         category_counts = category_df["category"].value_counts()
 
         st.caption(" · ".join(f"{cat}: {n}" for cat, n in category_counts.items()) + " — select a row to plot and see diagnostics.")
-        category_selection = st.dataframe(
-            category_df,
-            use_container_width=True,
-            hide_index=True,
-            on_select="rerun",
-            selection_mode="single-row",
-            height=580,
-            row_height=26,
-            column_order=["ProviderMnemonic", "provider", "category"],
-            column_config={"ProviderMnemonic": st.column_config.Column("haver_code")},
-        )
+        with row3_left:
+            category_selection = st.dataframe(
+                category_df,
+                use_container_width=True,
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+                height=580,
+                row_height=26,
+                column_order=["ProviderMnemonic", "provider", "category"],
+                column_config={"ProviderMnemonic": st.column_config.Column("haver_code")},
+            )
         category_selected_rows = category_selection.selection.rows
         if category_selected_rows:
             category_selected_mnemonics = (
@@ -302,14 +306,7 @@ source_summary = (
     .rename(columns={"haver_long_source": "Source", "with_alternate": "With alternate provider", "haver_only": "Haver only"})
 )
 
-# --- Side-by-side layout ---
-col_table, col_chart = st.columns([2, 3])
-
-with col_table:
-    st.subheader("Coverage by source")
-    st.dataframe(source_summary, use_container_width=True, hide_index=True, height=430)
-
-with col_chart:
+with row1_left:
     if category_pie_fig is not None:
         st.plotly_chart(category_pie_fig, use_container_width=True)
     else:
@@ -321,7 +318,7 @@ if selected_mnemonics:
 else:
     chart_df = filtered
 
-with col_cat_pie:
+with row3_right:
     st.subheader("Chart")
     st.caption(f"{chart_df['ProviderMnemonic'].nunique():,} series · {len(chart_df):,} rows")
 
@@ -384,6 +381,9 @@ if not chart_df.empty:
     ]
     st.caption(f"{len(series_info):,} series")
     st.dataframe(series_info, use_container_width=True, hide_index=True)
+
+st.subheader("Coverage by source")
+st.dataframe(source_summary, use_container_width=True, hide_index=True, height=430)
 
 # --- Raw data table ---
 st.subheader("Side by side data")
